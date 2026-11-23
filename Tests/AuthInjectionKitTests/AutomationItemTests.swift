@@ -17,6 +17,8 @@ final class AutomationItemTests: XCTestCase {
         let byKey = Dictionary(uniqueKeysWithValues: items.map { ($0.builtinKey!, $0) })
         XCTAssertEqual(byKey["appstore"]!.secretService, "com.immurok.appleid-password")
         XCTAssertEqual(byKey["passwords"]!.secretService, "com.immurok.password")
+        XCTAssertTrue(byKey["passwords"]!.usesLoginPassword)
+        XCTAssertFalse(byKey["1password"]!.usesLoginPassword)
         XCTAssertEqual(byKey["1password"]!.secretService, "com.immurok.onepassword-password")
         XCTAssertEqual(byKey["bitwarden"]!.secretService, "com.immurok.bitwarden-password")
     }
@@ -42,6 +44,14 @@ final class AutomationItemTests: XCTestCase {
         // 条目必须覆盖它才能被 AuthContextDetector 命中。
         let pw = AutomationItem.builtinDefaults().first { $0.builtinKey == "passwords" }!
         XCTAssertTrue(pw.bundleIDs.contains("com.apple.Safari"))
+        XCTAssertTrue(pw.isValid)
+    }
+
+    func testPasswordsBuiltinCoversPasskeySheetInThirdPartyBrowsers() {
+        // Chrome 等用 Apple Passwords 通行密钥登录时，要 Mac 账户密码的 sheet 里，
+        // 密码框属主是 AuthenticationServices.Helper（实测 2026-11-23，macOS 27）。
+        let pw = AutomationItem.builtinDefaults().first { $0.builtinKey == "passwords" }!
+        XCTAssertTrue(pw.bundleIDs.contains("com.apple.AuthenticationServices.Helper"))
         XCTAssertTrue(pw.isValid)
     }
 
@@ -80,5 +90,16 @@ final class AutomationItemTests: XCTestCase {
         XCTAssertTrue(item.isValid)
         var bad = item; bad.bundleIDs = ["bad\" injection"]
         XCTAssertFalse(bad.isValid)
+    }
+
+    func testRefreshDropsRetiredBuiltinItems() {
+        // 旧版本存过、现已不在内置表里的内置项（如一度存在的 sysauth）刷新时被丢弃，
+        // 否则它不可删、会一直留在列表里。
+        let retired = AutomationItem(id: UUID(), name: "System Authentication", enabled: true, builtinKey: "sysauth",
+            targetKind: .app, bundleIDs: ["com.apple.LocalAuthentication.UIAgent"], signing: .applePlatform,
+            extensionOrigin: nil, urlFragment: nil, fieldAXIdentifier: nil, submitStrategy: .generic)
+        let refreshed = AutomationItem.refreshingBuiltinIdentity(AutomationItem.builtinDefaults() + [retired])
+        XCTAssertNil(refreshed.first { $0.builtinKey == "sysauth" })
+        XCTAssertEqual(refreshed.count, 4)
     }
 }
